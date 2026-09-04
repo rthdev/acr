@@ -24,37 +24,45 @@ resource "azurerm_container_registry" "main" {
   public_network_access_enabled = true
   network_rule_bypass_option    = "AzureServices"
 
+  network_rule_set = [{
+    default_action = "Deny"
+    ip_rule = [
+      for cidr in var.github_actions_ip_ranges : {
+        action   = "Allow"
+        ip_range = cidr
+      }
+    ]
+  }]
+
   # Enable zone redundancy for high availability
   zone_redundancy_enabled = true
 
   # Encryption with customer-managed keys
   encryption {
-    enabled            = true
     key_vault_key_id   = azurerm_key_vault_key.acr_encryption.id
     identity_client_id = azurerm_user_assigned_identity.acr_encryption.client_id
   }
 
   # Enable the retention policy for untagged manifests
-  retention_policy {
-    days    = 7
-    enabled = true
-  }
-
-  # Trust policy for content trust
-  trust_policy {
-    enabled = true
-  }
+  retention_policy_in_days = 7
 
   # Quarantine policy to scan images before making them available
-  quarantine_policy {
-    enabled = true
-  }
+  quarantine_policy_enabled = true
 
   identity {
     type = "UserAssigned"
     identity_ids = [
       azurerm_user_assigned_identity.acr_encryption.id
     ]
+  }
+
+  dynamic "georeplications" {
+    for_each = sort(distinct(var.replication_regions))
+    content {
+      location                        = georeplications.value
+      global_endpoint_routing_enabled = true
+      zone_redundancy_enabled         = true
+    }
   }
 
   tags = {
@@ -65,21 +73,4 @@ resource "azurerm_container_registry" "main" {
   depends_on = [
     azurerm_key_vault_access_policy.acr_encryption
   ]
-}
-
-# Geo-replication to additional regions
-resource "azurerm_container_registry_replication" "replicas" {
-  for_each = toset(var.replication_regions)
-
-  name                      = each.value
-  container_registry_name   = azurerm_container_registry.main.name
-  resource_group_name       = azurerm_resource_group.acr.name
-  location                  = each.value
-  zone_redundancy_enabled   = true
-  regional_endpoint_enabled = true
-
-  tags = {
-    environment = var.environment
-    managed_by  = "terraform"
-  }
 }

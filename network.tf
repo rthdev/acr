@@ -11,11 +11,10 @@ resource "azurerm_private_dns_zone" "acr" {
 
 # Link DNS zone to hub VNet
 resource "azurerm_private_dns_zone_virtual_network_link" "acr_hub" {
-  name                  = "acr-hub-link"
-  resource_group_name   = azurerm_resource_group.acr.name
-  private_dns_zone_name = azurerm_private_dns_zone.acr.name
-  virtual_network_id    = var.hub_vnet_id
-  registration_enabled  = false
+  name                 = "acr-hub-link"
+  private_dns_zone_id  = azurerm_private_dns_zone.acr.id
+  virtual_network_id   = var.hub_vnet_id
+  registration_enabled = false
 
   tags = {
     environment = var.environment
@@ -27,11 +26,10 @@ resource "azurerm_private_dns_zone_virtual_network_link" "acr_hub" {
 resource "azurerm_private_dns_zone_virtual_network_link" "acr_aks_spokes" {
   for_each = var.aks_spoke_vnet_ids
 
-  name                  = "acr-aks-${each.key}-link"
-  resource_group_name   = azurerm_resource_group.acr.name
-  private_dns_zone_name = azurerm_private_dns_zone.acr.name
-  virtual_network_id    = each.value
-  registration_enabled  = false
+  name                 = "acr-aks-${each.key}-link"
+  private_dns_zone_id  = azurerm_private_dns_zone.acr.id
+  virtual_network_id   = each.value
+  registration_enabled = false
 
   tags = {
     environment = var.environment
@@ -46,7 +44,7 @@ resource "azurerm_subnet" "acr_endpoints" {
   virtual_network_name = var.hub_vnet_name
   address_prefixes     = [var.acr_endpoint_subnet_cidr]
 
-  private_endpoint_network_policies_enabled = false
+  private_endpoint_network_policies = "Disabled"
 }
 
 # Private endpoint for ACR
@@ -72,22 +70,4 @@ resource "azurerm_private_endpoint" "acr" {
     environment = var.environment
     managed_by  = "terraform"
   }
-}
-
-# Network rules for ACR - allow GitHub Actions
-resource "azurerm_container_registry_network_rule_set" "main" {
-  container_registry_id = azurerm_container_registry.main.id
-
-  default_action = "Deny"
-
-  # Allow GitHub Actions IP ranges for image push
-  ip_rule = [
-    for cidr in var.github_actions_ip_ranges : {
-      action   = "Allow"
-      ip_range = cidr
-    }
-  ]
-
-  # Allow Azure services
-  virtual_network = []
 }

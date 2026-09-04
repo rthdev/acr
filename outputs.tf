@@ -1,48 +1,73 @@
-output "registry_name" {
-  description = "Name of the container registry"
-  value       = azurerm_container_registry.main.name
-}
+# Private DNS zone for ACR
+resource "azurerm_private_dns_zone" "acr" {
+  name                = "privatelink.azurecr.io"
+  resource_group_name = azurerm_resource_group.acr.name
 
-output "registry_id" {
-  description = "Resource ID of the container registry"
-  value       = azurerm_container_registry.main.id
-}
-
-output "registry_login_server" {
-  description = "Login server URL for the registry"
-  value       = azurerm_container_registry.main.login_server
-}
-
-output "github_actions_client_id" {
-  description = "Client ID for GitHub Actions service principal"
-  value       = azuread_application.github_actions.client_id
-}
-
-output "github_actions_tenant_id" {
-  description = "Azure AD tenant ID"
-  value       = data.azurerm_client_config.current.tenant_id
-}
-
-output "github_actions_subscription_id" {
-  description = "Azure subscription ID"
-  value       = data.azurerm_client_config.current.subscription_id
-}
-
-output "aks_identity_ids" {
-  description = "Map of AKS managed identity resource IDs"
-  value = {
-    for k, v in azurerm_user_assigned_identity.aks_clusters : k => v.id
+  tags = {
+    environment = var.environment
+    managed_by  = "terraform"
   }
 }
 
-output "container_app_identity_ids" {
-  description = "Map of Container App managed identity resource IDs"
-  value = {
-    for k, v in azurerm_user_assigned_identity.container_apps : k => v.id
+# Link DNS zone to hub VNet
+resource "azurerm_private_dns_zone_virtual_network_link" "acr_hub" {
+  name                 = "acr-hub-link"
+  private_dns_zone_id  = azurerm_private_dns_zone.acr.id
+  virtual_network_id   = var.hub_vnet_id
+  registration_enabled = false
+
+  tags = {
+    environment = var.environment
+    managed_by  = "terraform"
   }
 }
 
-output "private_endpoint_ip" {
-  description = "Private IP address of the ACR endpoint"
-  value       = azurerm_private_endpoint.acr.private_service_connection[0].private_ip_address
+# Link DNS zone to AKS spoke VNets
+resource "azurerm_private_dns_zone_virtual_network_link" "acr_aks_spokes" {
+  for_each = var.aks_spoke_vnet_ids
+
+  name                 = "acr-aks-${each.key}-link"
+  private_dns_zone_id  = azurerm_private_dns_zone.acr.id
+  virtual_network_id   = each.value
+  registration_enabled = false
+
+  tags = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
+}
+
+# Subnet for ACR private endpoint
+resource "azurerm_subnet" "acr_endpoints" {
+  name                 = "snet-acr-endpoints"
+  resource_group_name  = var.hub_vnet_resource_group
+  virtual_network_name = var.hub_vnet_name
+  address_prefixes     = [var.acr_endpoint_subnet_cidr]
+
+  private_endpoint_network_policies = "Disabled"
+}
+
+# Private endpoint for ACR
+resource "azurerm_private_endpoint" "acr" {
+  name                = "pe-acr-${var.environment}"
+  location            = azurerm_resource_group.acr.location
+  resource_group_name = azurerm_resource_group.acr.name
+  subnet_id           = azurerm_subnet.acr_endpoints.id
+
+  private_service_connection {
+    name                           = "acr-private-connection"
+    private_connection_resource_id = azurerm_container_registry.main.id
+    is_manual_connection           = false
+    subresource_names              = ["registry"]
+  }
+
+  private_dns_zone_group {
+    name                 = "acr-dns-zone-group"
+    private_dns_zone_ids = [azurerm_private_dns_zone.acr.id]
+  }
+
+  tags = {
+    environment = var.environment
+    managed_by  = "terraform"
+  }
 }

@@ -1,3 +1,8 @@
+variable "subscription_id" {
+  description = "Azure subscription ID"
+  type        = string
+}
+
 variable "environment" {
   description = "Environment name (e.g., prod, staging)"
   type        = string
@@ -63,9 +68,7 @@ variable "github_actions_ip_ranges" {
   type        = list(string)
   default = [
     # These are example ranges - use actual GitHub IP ranges
-    "140.82.112.0/20",
-    "143.55.64.0/20",
-    "185.199.108.0/22",
+    "192.168.0.0/20",
     "192.30.252.0/22"
   ]
 }
